@@ -103,6 +103,7 @@ oc delete secret/${INSTANCE}-dwf-ibm-mt-dwf-server-tls-secret secret/${INSTANCE}
 oc delete secret/${INSTANCE}-clu-training-secret job/${INSTANCE}-clu-training-create -n $PROJECT_CPD_INSTANCE --ignore-not-found=true
 oc delete secret/${INSTANCE}-clu-training-secret job/${INSTANCE}-clu-training-update -n $PROJECT_CPD_INSTANCE --ignore-not-found=true
 oc delete secret registry-${INSTANCE}-clu-training-${INSTANCE}-dwf-training -n $PROJECT_CPD_INSTANCE --ignore-not-found=true
+oc delete hpa  $INSTANCE-clu-training-$INSTANCE-dwf -n $PROJECT_CPD_INSTANCE --ignore-not-found=true
 
 # Scale up watson-assistant-operator
 echo -e "\n##  Scaling up ibm-watson-assistant-operator to 1 replica"
@@ -123,16 +124,18 @@ done
 # Check all dwf pods
 declare -a deployments=("wa-dwf-ibm-mt-dwf-lcm" "wa-dwf-ibm-mt-dwf-trainer" "wa-clu-training-wa-dwf" )
 
-# Function to check if all pods are running for a deployment
-check_pods_running() {
-    local deployment=$1
-    local pod_status=$(oc get pods -n $PROJECT_CPD_INSTANCE  --field-selector='status.phase!=Running' -l deployment="$deployment" -o=jsonpath='{.items[*].status.phase}' | grep -v 'Completed')
-    if [ -z "$pod_status" ]; then
-        echo -e "\n##  All pods for deployment $deployment are running."
-        return 0
-    else
-        return 1
-    fi
+# Function to check if a deployment is ready
+check_deployments_ready() {
+  local deployment=$1
+  local deployment_status=$(oc get deployment "$deployment" -o=jsonpath='{.status.conditions[?(@.type=="Available")].status}')
+
+  if [ "$deployment_status" = "True" ]; then
+    echo -e "\nDeployment $deployment is ready."
+    return 0
+  else
+    echo -e "\nDeployment $deployment is not ready. Waiting .."
+    return 1
+  fi
 }
 
 # Check the deployments and their pods
@@ -143,19 +146,21 @@ while true; do
     for deployment in "${deployments[@]}"; do
         deployment_output=$(oc get deployment "$deployment" -n $PROJECT_CPD_INSTANCE  2>/dev/null)
         if [ -z "$deployment_output" ]; then
-            echo -e "\nDeployment $deployment does not exist."
+            echo -e "\nDeployment $deployment does not exist. Waiting .."
             all_pods_running=false
+            sleep 30
             break
         else
-            if ! check_pods_running "$deployment"; then
+            if ! check_deployments_ready "$deployment"; then
                 all_pods_running=false
+                sleep 60
                 break
             fi
         fi
     done
 
     if $all_pods_running; then
-        echo -e "\n##  All deployments and their pods are in a good state."
+        echo -e "\n##  All deployments are now ready."
         break
     fi
 
