@@ -118,7 +118,7 @@ while true; do
         break
     fi
     echo -e "\nWaiting for modeltraindynamicworkflow CR to appear."
-    sleep 15
+    sleep 60
 done
 
 # Check all dwf pods
